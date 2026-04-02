@@ -1,7 +1,6 @@
-from fastapi import FastAPI, HTTPException, Request, Form, UploadFile, File
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.sessions import SessionMiddleware
 from psycopg2.extras import execute_values
 import psycopg2
 import json
@@ -9,9 +8,7 @@ from datetime import datetime
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
-
-UPLOAD_PASSWORD = os.getenv("UPLOAD_PASSWORD", "password")
+load_dotenv(override=True)
 
 REQUIRED_KEYS = [
     "Case Number", "Service Center", "Case Type", "Case Status",
@@ -20,7 +17,6 @@ REQUIRED_KEYS = [
 
 app = FastAPI(title="Caseflow API — Architecture A (Monolithic)")
 
-app.add_middleware(SessionMiddleware, secret_key=os.getenv("SECRET_KEY", "password"))
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["URL_TO_FRONTEND"],
@@ -88,99 +84,7 @@ def parse_dt(value):
             continue
     return None
         
-# ── Auth helper ───────────────────────────────────────────────────────────────
-
-def require_auth(request: Request):
-    if not request.session.get("authenticated"):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-
 # ── HTML pages ────────────────────────────────────────────────────────────────
-
-LOGIN_HTML = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Caseflow – Login</title>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<style>
-  :root {
-    --ink: #111827; --muted: #6b7280; --sand: #f7f3ea;
-    --teal: #0f766e; --teal-dark: #0b5f58;
-    --card: #fffdf8; --line: rgba(17,24,39,0.12);
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: 'Space Grotesk', sans-serif;
-    background: radial-gradient(1200px 800px at 15% -10%, #fff2c9 0%, transparent 60%),
-                radial-gradient(900px 600px at 90% 10%, #cfeee8 0%, transparent 55%),
-                var(--sand);
-    min-height: 100vh; display: flex; align-items: center; justify-content: center;
-    color: var(--ink);
-  }
-  .frame {
-    width: min(920px, 92vw); display: grid;
-    grid-template-columns: 1.1fr 0.9fr; gap: 28px; align-items: stretch;
-  }
-  .hero {
-    padding: 48px 36px; border-radius: 18px; border: 1px solid var(--line);
-    background: linear-gradient(135deg, #fff7e8 0%, #fef3e2 45%, #e7f6f2 100%);
-  }
-  .hero h1 { font-size: 26px; font-weight: 700; margin: 12px 0 10px; }
-  .hero p  { font-size: 14px; color: var(--muted); }
-  .card {
-    background: var(--card); border: 1px solid var(--line); border-radius: 18px;
-    padding: 38px 34px; box-shadow: 0 14px 30px rgba(17,24,39,0.12);
-  }
-  h2 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
-  .sub { font-size: 14px; color: var(--muted); margin-bottom: 26px; }
-  label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
-  input[type="password"] {
-    width: 100%; padding: 12px 14px;
-    border: 1px solid rgba(17,24,39,0.18); border-radius: 10px;
-    font-size: 14px; font-family: 'Space Grotesk', sans-serif;
-    outline: none; margin-bottom: 18px; background: #fff;
-    transition: border-color 0.15s, box-shadow 0.15s;
-  }
-  input[type="password"]:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(15,118,110,0.15); }
-  button {
-    width: 100%; padding: 12px;
-    background: linear-gradient(135deg, var(--teal) 0%, #14b8a6 100%);
-    color: white; border: none; border-radius: 10px;
-    font-size: 14px; font-weight: 600; font-family: 'Space Grotesk', sans-serif;
-    cursor: pointer; transition: transform 0.12s, box-shadow 0.2s;
-  }
-  button:hover { transform: translateY(-1px); box-shadow: 0 10px 20px rgba(15,118,110,0.25); }
-  .error {
-    background: #fff1f2; border: 1px solid #fecdd3; color: #9f1239;
-    padding: 10px 14px; border-radius: 10px; font-size: 13px; margin-bottom: 14px;
-  }
-  @media (max-width: 820px) { .frame { grid-template-columns: 1fr; } .hero { order: 2; } }
-</style>
-</head>
-<body>
-<div class="frame">
-  <section class="hero">
-    <div style="font-size:12px;font-weight:600;letter-spacing:0.08em;color:var(--teal)">CASEFLOW</div>
-    <h1>Dataset-driven case tracking.</h1>
-    <p>Upload your JSON dataset and Caseflow keeps the database clean, current, and ready.</p>
-  </section>
-  <div class="card">
-    <h2>Caseflow</h2>
-    <p class="sub">Enter your password to access the import tool.</p>
-    {error}
-    <form method="post" action="/login">
-      <label>Password</label>
-      <input type="password" name="password" placeholder="Enter password" autofocus required/>
-      <button type="submit">Sign in</button>
-    </form>
-  </div>
-</div>
-</body>
-</html>
-"""
 
 UPLOAD_HTML = """
 <!DOCTYPE html>
@@ -421,40 +325,18 @@ UPLOAD_HTML = """
 """
 
 
-# ── Auth routes ───────────────────────────────────────────────────────────────
-
 @app.get("/", response_class=HTMLResponse)
-def root(request: Request):
-    if request.session.get("authenticated"):
-        return RedirectResponse(url="/upload")
-    return HTMLResponse(LOGIN_HTML.replace("{error}", ""))
-
-
-@app.post("/login")
-async def login(request: Request, password: str = Form(...)):
-    if password == UPLOAD_PASSWORD:
-        request.session["authenticated"] = True
-        return RedirectResponse(url="/upload", status_code=303)
-    error = '<div class="error">Incorrect password. Please try again.</div>'
-    return HTMLResponse(LOGIN_HTML.replace("{error}", error), status_code=401)
-
-
-@app.get("/logout")
-def logout(request: Request):
-    request.session.clear()
-    return RedirectResponse(url="/")
+def root():
+    return RedirectResponse(url="/upload")
 
 
 @app.get("/upload", response_class=HTMLResponse)
-def upload_page(request: Request):
-    if not request.session.get("authenticated"):
-        return RedirectResponse(url="/")
+def upload_page():
     return HTMLResponse(UPLOAD_HTML)
 
 
 @app.post("/import-json")
-async def import_json(request: Request, file: UploadFile = File(...)):
-    require_auth(request)
+async def import_json(file: UploadFile = File(...)):
     content  = await file.read()
     filename = file.filename or "upload.json"
 

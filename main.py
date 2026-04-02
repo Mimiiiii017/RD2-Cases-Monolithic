@@ -2,13 +2,21 @@ from fastapi import FastAPI, HTTPException, Request, Form, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+from psycopg2.extras import execute_values
 import psycopg2
+import json
+from datetime import datetime
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
 UPLOAD_PASSWORD = os.getenv("UPLOAD_PASSWORD", "password")
+
+REQUIRED_KEYS = [
+    "Case Number", "Service Center", "Case Type", "Case Status",
+    "Title", "Application Filed Date", "Last Received Date",
+]
 
 app = FastAPI(title="Caseflow API — Architecture A (Monolithic)")
 
@@ -61,6 +69,15 @@ def ensure_tables(conn):
         """)
         conn.commit()
         
+def parse_dt(value):
+    if not value:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(str(value).strip(), fmt)
+        except ValueError:
+            continue
+    return None
         
 # ── Auth helper ───────────────────────────────────────────────────────────────
 
@@ -424,3 +441,103 @@ def upload_page(request: Request):
     if not request.session.get("authenticated"):
         return RedirectResponse(url="/")
     return HTMLResponse(UPLOAD_HTML)
+
+
+@app.post("/import-json")
+async def import_json(request: Request, file: UploadFile = File(...)):
+    require_auth(request)
+    content  = await file.read()
+    filename = file.filename or "upload.json"
+
+    # Parse JSON
+    try:
+        records = json.loads(content)
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+
+    if not isinstance(records, list):
+        raise HTTPException(status_code=400, detail="JSON must be an array of objects")
+
+    # Validate and normalise
+    rows_read = len(records)
+    cleaned   = {}
+    for rec in records:
+        missing = [k for k in REQUIRED_KEYS if k not in rec]
+        if missing:
+            raise HTTPException(status_code=400, detail=f"Missing keys: {missing}")
+
+        last_received = parse_dt(rec.get("Last Received Date"))
+        case_number   = str(rec.get("Case Number", "")).strip()
+
+        if not case_number or last_received is None:
+            continue
+
+        row = (
+            case_number,
+            str(rec.get("Service Center", "")).strip(),
+            str(rec.get("Case Type", "")).strip(),
+            str(rec.get("Case Status", "")).strip().lower(),
+            str(rec.get("Title", "")).strip(),
+            parse_dt(rec.get("Application Filed Date")),
+            last_received,
+            datetime.utcnow(),
+        )
+
+        # Deduplicate: keep latest last_received_date per case number
+        if case_number not in cleaned or last_received > cleaned[case_number][6]:
+            cleaned[case_number] = row
+
+    rows      = list(cleaned.values())
+    rows_kept = len(rows)
+
+    # DB operations
+    try:
+        conn = get_conn()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Database connection failed: {e}")
+
+    try:
+        ensure_tables(conn)
+
+        with conn.cursor() as cur:
+            execute_values(cur, """
+                INSERT INTO public.case_latest
+                    (case_number, service_center, case_type, case_status,
+                     title, application_filed_date, last_received_date, updated_at)
+                VALUES %s
+                ON CONFLICT (case_number) DO UPDATE SET
+                    service_center         = EXCLUDED.service_center,
+                    case_type              = EXCLUDED.case_type,
+                    case_status            = EXCLUDED.case_status,
+                    title                  = EXCLUDED.title,
+                    application_filed_date = EXCLUDED.application_filed_date,
+                    last_received_date     = EXCLUDED.last_received_date,
+                    updated_at             = EXCLUDED.updated_at;
+            """, rows)
+        conn.commit()
+
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM public.case_latest")
+            total_in_db = cur.fetchone()[0]
+
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO public.import_runs
+                    (filename, rows_read, rows_kept, rows_skipped, total_in_db)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (filename, rows_read, rows_kept, rows_read - rows_kept, total_in_db))
+        conn.commit()
+
+        return {
+            "status":       "success",
+            "filename":     filename,
+            "rows_read":    rows_read,
+            "rows_kept":    rows_kept,
+            "rows_skipped": rows_read - rows_kept,
+            "total_in_db":  total_in_db,
+        }
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    finally:
+        conn.close()

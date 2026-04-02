@@ -69,6 +69,15 @@ def ensure_tables(conn):
         """)
         conn.commit()
         
+@app.api_route("/health", methods=["GET", "HEAD"])
+def health():
+    try:
+        conn = get_conn()
+        conn.close()
+        return {"status": "ok", "db": "connected"}
+    except Exception as e:
+        return {"status": "error", "db": str(e)}
+        
 def parse_dt(value):
     if not value:
         return None
@@ -539,5 +548,198 @@ async def import_json(request: Request, file: UploadFile = File(...)):
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    finally:
+        conn.close()
+        
+# ── Dashboard API ─────────────────────────────────────────────────────────────
+
+@app.get("/api/stats")
+def api_stats():
+    try:
+        conn = get_conn()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM public.case_latest")
+            total = cur.fetchone()[0]
+
+            cur.execute("""
+                SELECT case_status FROM public.case_latest
+                GROUP BY case_status ORDER BY COUNT(*) DESC LIMIT 1
+            """)
+            row = cur.fetchone()
+            top_status = row[0] if row else "N/A"
+
+            cur.execute("SELECT MAX(updated_at) FROM public.case_latest")
+            last = cur.fetchone()[0]
+
+            cur.execute("""
+                SELECT AVG(EXTRACT(EPOCH FROM (last_received_date - application_filed_date)) / 86400)
+                FROM public.case_latest
+                WHERE application_filed_date IS NOT NULL
+                AND last_received_date IS NOT NULL
+            """)
+            avg = cur.fetchone()[0]
+
+        return {
+            "total_cases":        total,
+            "top_status":         top_status,
+            "last_import":        last.isoformat() if last else None,
+            "avg_processing_days": round(float(avg), 1) if avg else None,
+        }
+    finally:
+        conn.close()
+
+
+@app.get("/api/charts/by-month")
+def api_by_month():
+    try:
+        conn = get_conn()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT TO_CHAR(application_filed_date, 'YYYY-MM') AS month,
+                       case_status, COUNT(*) AS cnt
+                FROM public.case_latest
+                WHERE application_filed_date IS NOT NULL
+                GROUP BY month, case_status
+                ORDER BY month ASC, cnt DESC
+            """)
+            rows = cur.fetchall()
+        data = {}
+        for month, status, cnt in rows:
+            data.setdefault(month, {})[status] = cnt
+        return {"data": data}
+    finally:
+        conn.close()
+
+
+@app.get("/api/charts/by-day")
+def api_by_day(month: str):
+    try:
+        conn = get_conn()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT TO_CHAR(application_filed_date, 'YYYY-MM-DD') AS day,
+                       case_status, COUNT(*) AS cnt
+                FROM public.case_latest
+                WHERE TO_CHAR(application_filed_date, 'YYYY-MM') = %s
+                GROUP BY day, case_status
+                ORDER BY day ASC
+            """, (month,))
+            rows = cur.fetchall()
+        data = {}
+        for day, status, cnt in rows:
+            data.setdefault(day, {})[status] = cnt
+        return {"month": month, "data": data}
+    finally:
+        conn.close()
+
+
+@app.get("/api/charts/pie-month")
+def api_pie_month(month: str):
+    try:
+        conn = get_conn()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT case_status, COUNT(*) AS cnt
+                FROM public.case_latest
+                WHERE TO_CHAR(application_filed_date, 'YYYY-MM') = %s
+                GROUP BY case_status ORDER BY cnt DESC
+            """, (month,))
+            rows = cur.fetchall()
+        return {"month": month, "data": [{"status": r[0], "count": r[1]} for r in rows]}
+    finally:
+        conn.close()
+
+
+@app.get("/api/charts/pie-day-filed")
+def api_pie_day_filed(date: str):
+    try:
+        conn = get_conn()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT case_status, COUNT(*) AS cnt
+                FROM public.case_latest
+                WHERE DATE(application_filed_date) = %s
+                GROUP BY case_status ORDER BY cnt DESC
+            """, (date,))
+            rows = cur.fetchall()
+        return {"date": date, "data": [{"status": r[0], "count": r[1]} for r in rows]}
+    finally:
+        conn.close()
+
+
+@app.get("/api/search")
+def api_search(case_number: str = None, date: str = None):
+    if not case_number and not date:
+        raise HTTPException(status_code=400, detail="Provide case_number or date")
+    try:
+        conn = get_conn()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    try:
+        with conn.cursor() as cur:
+            if case_number:
+                cur.execute("""
+                    SELECT case_number, service_center, case_type, case_status,
+                           title, application_filed_date, last_received_date, updated_at
+                    FROM public.case_latest
+                    WHERE UPPER(case_number) = UPPER(%s)
+                """, (case_number.strip(),))
+            else:
+                cur.execute("""
+                    SELECT case_number, service_center, case_type, case_status,
+                           title, application_filed_date, last_received_date, updated_at
+                    FROM public.case_latest
+                    WHERE DATE(application_filed_date) = %s
+                    ORDER BY application_filed_date DESC
+                """, (date,))
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+        for row in rows:
+            for k, v in row.items():
+                if hasattr(v, 'isoformat'):
+                    row[k] = v.isoformat()
+
+        return {"results": rows, "count": len(rows)}
+    finally:
+        conn.close()
+
+
+@app.get("/api/import-runs")
+def api_import_runs():
+    try:
+        conn = get_conn()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, filename, imported_at, rows_read, rows_kept,
+                       rows_skipped, total_in_db
+                FROM public.import_runs
+                ORDER BY imported_at DESC
+                LIMIT 50
+            """)
+            cols = [d[0] for d in cur.description]
+            runs = [dict(zip(cols, r)) for r in cur.fetchall()]
+        for run in runs:
+            if run.get("imported_at"):
+                run["imported_at"] = run["imported_at"].isoformat()
+        return {"runs": runs, "count": len(runs)}
     finally:
         conn.close()

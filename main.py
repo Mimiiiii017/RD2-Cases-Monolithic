@@ -335,6 +335,11 @@ def upload_page():
     return HTMLResponse(UPLOAD_HTML)
 
 
+@app.get("/logout")
+def logout():
+    return RedirectResponse(url="/upload")
+
+
 @app.post("/import-json")
 async def import_json(file: UploadFile = File(...)):
     content  = await file.read()
@@ -357,7 +362,7 @@ async def import_json(file: UploadFile = File(...)):
         if missing:
             raise HTTPException(status_code=400, detail=f"Missing keys: {missing}")
 
-        last_received = parse_dt(rec.get("Last Received Date"))
+        last_received = parse_dt(rec.get("Last Updated Date"))
         case_number   = str(rec.get("Case Number", "")).strip()
 
         if not case_number or last_received is None:

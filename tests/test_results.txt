@@ -1,0 +1,46 @@
+﻿Test Run: 2026-04-25 16:17:11
+============================================================
+============================= test session starts =============================
+platform win32 -- Python 3.13.13, pytest-8.3.3, pluggy-1.6.0 -- C:\Users\mirey\Documents\Github\RD2-Cases-Modular\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\mirey\Documents\Github\RD2-Cases-Monolithic
+plugins: anyio-4.13.0
+collecting ... collected 29 items
+
+tests/test_api_contract.py::test_health_contract PASSED                  [  3%]
+tests/test_api_contract.py::test_import_accepts_last_updated_date PASSED [  6%]
+tests/test_api_contract.py::test_search_contract PASSED                  [ 10%]
+tests/test_api_contract.py::test_logout_redirect PASSED                  [ 13%]
+tests/test_api_contract.py::test_import_and_search_data_flow PASSED      [ 17%]
+tests/test_api_contract.py::test_deduplication_keeps_latest_date PASSED  [ 20%]
+tests/test_api_contract.py::test_root_redirects_to_upload PASSED         [ 24%]
+tests/test_api_contract.py::test_upload_page_returns_html PASSED         [ 27%]
+tests/test_api_contract.py::test_stats_contract PASSED                   [ 31%]
+tests/test_api_contract.py::test_import_runs_contract PASSED             [ 34%]
+tests/test_api_contract.py::test_charts_by_month_contract PASSED         [ 37%]
+tests/test_api_contract.py::test_charts_by_day_contract PASSED           [ 41%]
+tests/test_api_contract.py::test_charts_pie_month_contract PASSED        [ 44%]
+tests/test_api_contract.py::test_charts_pie_day_filed_contract PASSED    [ 48%]
+tests/test_api_contract.py::test_search_no_params_returns_400 PASSED     [ 51%]
+tests/test_api_contract.py::test_import_invalid_json_returns_400 PASSED  [ 55%]
+tests/test_api_contract.py::test_import_not_array_returns_400 PASSED     [ 58%]
+tests/test_api_contract.py::test_import_missing_keys_returns_400 PASSED  [ 62%]
+tests/test_api_contract.py::test_import_empty_array PASSED               [ 65%]
+tests/test_api_contract.py::test_import_skips_blank_case_number PASSED   [ 68%]
+tests/test_api_contract.py::test_import_dedup_within_payload PASSED      [ 72%]
+tests/test_api_contract.py::test_search_by_date_contract PASSED          [ 75%]
+tests/test_api_contract.py::test_import_normalises_status_to_lowercase PASSED [ 79%]
+tests/test_api_contract.py::test_search_case_insensitive PASSED          [ 82%]
+tests/test_api_contract.py::test_import_date_only_format PASSED          [ 86%]
+tests/test_api_contract.py::test_import_skips_record_with_null_last_updated_date PASSED [ 89%]
+tests/test_api_contract.py::test_import_multi_record PASSED              [ 93%]
+tests/test_api_contract.py::test_import_response_echoes_filename PASSED  [ 96%]
+tests/test_api_contract.py::test_search_result_dates_are_iso_strings PASSED [100%]
+
+============================== warnings summary ===============================
+tests/test_api_contract.py: 13 warnings
+  C:\Users\mirey\Documents\Github\RD2-Cases-Monolithic\main.py:379: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    datetime.utcnow(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 29 passed, 13 warnings in 0.39s =======================
